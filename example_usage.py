@@ -20,7 +20,7 @@ def example_for_detector():
     
     # 查询相关卡片
     relevant_cards = service.query_relevant_jcards(query)
-    print(f"Detector 查询到 {len(relevant_cards)} 张相关卡片")
+    print(f"Detector 查询到 {len(relevant_cards)}>Reload Window关卡片")
     
     for card in relevant_cards[:3]:  # 显示前3张
         print(f"  - {card.fact_key}: {card.value} (置信度: {card.confidence})")

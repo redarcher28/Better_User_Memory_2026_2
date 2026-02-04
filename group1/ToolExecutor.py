@@ -1,7 +1,7 @@
 from dotenv import load_dotenv
 import os
 from serpapi import SerpApiClient
-from typing import Dict, Any
+from typing import Dict, Any, List
 from datetime import datetime
 import pytz
 
@@ -12,83 +12,137 @@ from scipy import optimize
 # 加载 .env 文件中的环境变量
 load_dotenv()
 
+# 引用同目录下 group1 模块中的 RAG 查询与数据库接口（与 group1.py 同目录，直接 import group1）
+try:
+    from . import group1 as _group1
+except ImportError:
+    import group1 as _group1
 
-def get_rag_history() -> List[str]:
+
+def get_rag_history(
+    query: str,
+    jcards_db: _group1.Jcards_db,
+    embed_db: _group1.Embed_db,
+) -> List[str]:
     """
-    引用RAG，返回以前需要的对话记录的片段
+    引用RAG，返回以前需要的对话记录的片段。
+    内部调用 group1.RAG_query.return_reranked_chunks 完成检索与重排。
 
     详细说明：
     - 此函数用于从RAG系统中检索以前的对话记录片段
     - 这些片段是系统认为与当前任务相关的历史对话内容
     - 返回的是一个字符串列表，每个字符串代表一个对话记录片段
-    - 后续实现将包含具体的RAG检索逻辑
+
+    参数：
+    - query: 用户当前查询/提示词，用于检索相关片段
+    - jcards_db: Jcards 数据库实例
+    - embed_db: 向量数据库实例
 
     返回值：
-    - List[str]: 包含以前需要的对话记录片段的列表
+    - List[str]: 包含与 query 最相关的对话记录片段列表（重排后的 top 片段）
     """
-    # 生成一些模拟的对话记录片段作为返回值
-    return [
-        "用户: 什么是RAG技术？",
-        "系统: RAG (Retrieval-Augmented Generation) 是一种结合了信息检索和生成式AI的技术，通过从外部知识库检索相关信息来增强大语言模型的回答能力。",
-        "用户: RAG与传统的LLM有什么区别？",
-        "系统: 传统LLM依赖于训练数据中的知识，而RAG可以实时从外部数据源检索最新信息，克服了LLM知识截止日期的限制。",
-        "用户: 如何实现一个简单的RAG系统？",
-        "系统: 实现RAG系统通常需要以下步骤：1. 构建知识库并进行向量化；2. 实现检索模块；3. 设计提示词模板；4. 集成LLM生成回答。"
-    ]
+    rag = _group1.RAG_query()
+    return rag.return_reranked_chunks(query=query, jcards_db=jcards_db, embed_db=embed_db)
 
 
-def update_rag_vector_store(action: str, concluded_content: str) -> None:
-
+def update_rag_vector_store(
+    action: str,
+    concluded_content: str,
+    *,
+    chunk_ids: List[str] | None = None,
+    conversation_id: str | None = None,
+    turn_id: int | None = None,
+    speaker: str | None = None,
+    timestamp: str | None = None,
+    correct_behavior: str = "replace",
+) -> tuple[List[str], List[str], List[str], List[str]]:
     """
     para:
     action: str, 具体的操作类型，有:
     {
-    "Add" : 添加新的聊天记录
-    "Correct" : 修改错误的聊天记录
+    "Add" : 添加新的聊天记录。此时必须提供 conversation_id / turn_id / speaker / timestamp；
+            chunk_ids 为 None。
+    "Correct" : 修改错误的聊天记录。此时必须提供 chunk_ids（要修改的 chunk 的可追溯标识）；
+                concluded_content 为替换后的内容。
     }
-    concluded_content: str, 模型从提示词和自己生成的内容中总结出的聊天记录
+    concluded_content: str, 模型从提示词和自己生成的内容中总结出的聊天记录（Add 为新增内容，Correct 为替换内容）。
+    chunk_ids: List[str] | None, 可追溯的 chunk 标识列表。实现上可为 chunk_id，或由
+               (conversation_id, turn_range, chunk_version) 生成的稳定 ID。Correct 时必填，Add 时为 None。
+    conversation_id: str | None, 会话 ID，Add 时必填，用于与现有切分/追溯逻辑一致。
+    turn_id: int | None, 轮次 ID，Add 时必填。
+    speaker: str | None, 发言者（如 "user" / "assistant"），Add 时必填。
+    timestamp: str | None, 时间戳，Add 时必填。
+    correct_behavior: str, 仅 Correct 时有效。可选:
+    {
+    "overwrite" : 覆盖同 id：在原 chunk_id 上原地更新内容，旧内容不再被检索。
+    "replace"   : 逻辑删除旧 chunk + 写入新 chunk：旧 chunk 标记删除不再命中，新 chunk 使用新 id 或版本。
+                  默认 "replace"，避免旧内容继续被检索命中。
+    }
 
-    详细说明： 此函数用于Agent添加或修改RAG向量库的内容
-    - 添加内容：
-    如果 action 为“Add”，则添加内容。具体为在片段库和向量库的最后添加新的聊天记录
+    返回值：tuple[List[str], List[str], List[str], List[str]]
+    元组 (upserted_ids, updated_ids, deleted_ids, errors)，供 Agent 判断是否执行成功。
 
-    - 修改内容：
-    如果 action为“Correct”,则修改内容。 具体为让模型指定它收到的片段中哪几号片段需要删除并修改
+    详细说明： 此函数用于 Agent 添加或修改 RAG 向量库的内容；写入时需至少包含
+    conversation_id / turn_id / speaker / timestamp 等元数据，否则无法按现有切分与追溯逻辑构建 chunk。
 
+    - 添加内容（Add）：
+    在片段库和向量库中追加新 chunk。必须提供 conversation_id、turn_id、speaker、timestamp，
+    与 concluded_content 一起构成可追溯的增量；仅有 concluded_content 不足以做可靠增量。
 
-    - 修改方式：
-      1. 接收文档内容，将其分割成适当大小的片段
-      2. 使用嵌入模型为每个片段生成向量表示
-      3. 将向量和对应的文本片段存储到向量数据库中
-      4. 对于更新操作，先删除旧版本，再添加新版本
-      5. 对于删除操作，根据文档ID或内容特征定位并移除
-    - 后续实现将包含具体的向量库操作逻辑，支持主流向量数据库如FAISS、Pinecone等
-    - 此函数无返回值
+    - 修改内容（Correct）：
+    根据 chunk_ids 精确定位要修改的 chunk（chunk_id 或由 conversation_id + turn_range + chunk_version 确定）。
+    行为由 correct_behavior 决定：overwrite 原地覆盖同 id；replace 逻辑删除旧 chunk 再写新 chunk，
+    避免旧内容继续被检索命中。
+
+    - 总结式写入（source="summary"）：
+    若为独立总结 chunk，则作为新 chunk 写入并在 metadata 中标记 source="summary"；
+    若为替换原事件，则与 Correct 语义配合，并在 metadata 中标识 source="summary"。
+
+    - 修改方式（实现参考）：
+      1. 根据 chunk_ids 或元数据生成/解析可追溯标识，保证 Correct 可精确修改。
+      2. 写入时附带 conversation_id、turn_id、speaker、timestamp、source 等元数据。
+      3. Correct 时按 correct_behavior 执行覆盖或逻辑删除+插入。
+      4. 返回元组 (upserted_ids, updated_ids, deleted_ids, errors)，供 Agent 判断是否执行成功。
     """
     # 函数体暂时为空，等待后续实现具体的向量库修改逻辑
     pass
 
 
-def update_jcards_database() -> None:
+def update_jcards_database(
+    action: str, card_content: str | None, number: List[int] | None
+) -> None:
     """
-    修改Jcards库
+    para:
+    action: str, 具体的操作类型，有:
+    {
+    "Add" : 添加新卡片, 此时number为None，card_content为卡片内容
+    "Correct" : 修改已有卡片, 此时number为需要修改的卡片的编号列表，card_content为修改后的内容
+    "Delete" : 删除卡片, 此时number为需要删除的卡片的编号列表，card_content为None
+    }
+    card_content: str | None, 卡片内容（如标题、正文、标签等元数据）。Add/Correct 时必填，Delete 时为 None
+    number: List[int] | None, 要操作（修改或删除）的卡片编号列表。Add 时为 None，Correct/Delete 时必填
 
-    详细说明：
-    - 此函数用于修改Jcards库的内容，包括添加新卡片、更新现有卡片或删除不需要的卡片
+    详细说明： 此函数用于Agent添加、修改或删除Jcards库中的卡片
+
+    - 添加内容：
+    如果 action 为 "Add"，则添加新卡片。
+    具体为将 card_content 解析并写入片段库/卡片库，并建立相应索引。
+
     - 修改内容：
-      1. 添加新的卡片到Jcards库中，如产品信息、知识点、问答对等
-      2. 更新Jcards库中已有的卡片，确保信息的准确性和完整性
-      3. 删除Jcards库中过时或不再相关的卡片，保持库的质量
+    如果 action 为 "Correct"，则修改已有卡片。
+    具体为根据 number 中的编号定位待修改卡片，用 card_content 替换对应内容。
+
+    - 删除内容：
+    如果 action 为 "Delete"，则删除卡片。
+    具体为根据 number 中的编号定位并移除对应卡片。
+
     - 修改方式：
-      1. 接收卡片内容，包括卡片标题、正文、标签等元数据
-      2. 对卡片内容进行预处理，如格式标准化、关键词提取等
-      3. 将处理后的卡片存储到Jcards数据库中
-      4. 对于更新操作，根据卡片ID或内容特征定位并替换旧版本
-      5. 对于删除操作，根据卡片ID或内容特征定位并移除
-    - 后续实现将包含具体的Jcards库操作逻辑，支持卡片的分类、索引和检索
+      1. 根据 action 与 number 确定操作对象（若为 Add 则无待操作对象）。
+      2. 对 card_content 做预处理（格式标准化、关键词提取等，仅 Add/Correct 时）。
+      3. 将结果写入 Jcards 数据库，并维护分类、索引与检索所需结构。
     - 此函数无返回值
     """
-    # 函数体暂时为空，等待后续实现具体的Jcards库修改逻辑
+    # 函数体暂时为空，等待后续实现具体的 Jcards 库修改逻辑
     pass
 
 

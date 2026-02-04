@@ -13,7 +13,8 @@ class Jcards_db:
 
 class RAG_write:
     def embed_chunk(query: str) -> List[float]:
-        """向量数据库写入"""
+        """将query转换为向量表示"""
+        pass
 
 class Embed_db:
     """向量数据库接口类"""
@@ -37,19 +38,6 @@ class Embed_db:
         """
         pass
 
-
-class Active_service:
-    """主动服务接口类"""
-
-    def get_active(self) -> Tuple[bool, Optional[List[str]]]:
-        """
-        返回是否主动服务，即布尔值Active，和主动服务卡内容，即active_content。
-        如果Active为False，则active_content为none
-
-        Returns:
-            Tuple[bool, Optional[List[str]]]: (是否主动服务, 主动服务卡内容)
-        """
-        pass
 
 
 class RAG_query:
