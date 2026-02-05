@@ -12,8 +12,7 @@
 
 from __future__ import annotations
 
-import argparse
-import json
+import hashlib
 import re
 import sys
 from collections import defaultdict
@@ -45,6 +44,13 @@ class MemoryEvent(BaseModel):
     timestamp: str | None = None
     participants: list[str] = Field(default_factory=list)
     locale: str | None = "zh-CN"
+
+
+class RAGUpdateResult(BaseModel):
+    upserted_ids: List[str] = Field(default_factory=list)
+    updated_ids: List[str] = Field(default_factory=list)
+    deleted_ids: List[str] = Field(default_factory=list)
+    errors: List[str] = Field(default_factory=list)
 
 
 @dataclass
@@ -238,15 +244,11 @@ def build_chunk_records(
     return records
 
 
-def embed_texts(model: SentenceTransformer, texts: List[str], batch_size: int = 32) -> List[List[float]]:
-    emb = model.encode(
-        texts,
-        batch_size=batch_size,
-        normalize_embeddings=True,  # cosine space recommended
-        show_progress_bar=len(texts) > 64,
-    )
-    # ensure python lists
-    return np.asarray(emb, dtype=np.float32).tolist()
+def deterministic_summary_chunk_id(
+    conversation_id: str, turn_start: int, turn_end: int, chunk_version: int, source: str = "summary"
+) -> str:
+    raw = f"{conversation_id}|{turn_start}|{turn_end}|v{chunk_version}|{source}".encode("utf-8")
+    return "sum_" + hashlib.sha1(raw).hexdigest()
 
 
 class EmbeddingService:
@@ -295,35 +297,6 @@ class EmbeddingService:
             cls._instance = cls(model_name)
         return cls._instance
     
-    def embed_chunk(self, query: str) -> List[float]:
-        """
-        将单个查询字符串向量化（供记忆查询层调用）
-        
-        参数:
-            query: 用户提示词/查询内容
-        
-        返回:
-            List[float]: 向量表示（已归一化，适合余弦相似度）
-        
-        示例:
-            >>> service = EmbeddingService.get_instance()
-            >>> vector = service.embed_chunk("我护照什么时候过期？")
-            >>> print(len(vector))  # 512 (BAAI/bge-small-zh-v1.5的维度)
-        """
-        if not query or not query.strip():
-            raise ValueError("Query cannot be empty")
-        
-        # 使用model.encode进行向量化
-        embedding = self._model.encode(
-            [query],  # encode需要列表输入
-            batch_size=1,
-            normalize_embeddings=True,  # 归一化（余弦相似度空间）
-            show_progress_bar=False
-        )
-        
-        # 返回单个向量（List[float]格式）
-        return np.asarray(embedding[0], dtype=np.float32).tolist()
-    
     def embed_batch(self, queries: List[str], batch_size: int = 32) -> List[List[float]]:
         """
         批量向量化（性能优化）
@@ -348,41 +321,51 @@ class EmbeddingService:
         return np.asarray(embeddings, dtype=np.float32).tolist()
 
 
-# 便捷函数：供外部快速调用
-def embed_chunk(query: str, model_name: str = "BAAI/bge-small-zh-v1.5") -> List[float]:
-    """
-    便捷函数：将用户查询向量化（供记忆查询层调用）
-    
-    参数:
-        query: 用户提示词内容
-        model_name: embedding模型名称（可选）
-    
-    返回:
-        List[float]: query的向量形式（已归一化）
-    
-    示例:
-        >>> from rag_ingest_incremental import embed_chunk
-        >>> vector = embed_chunk("我护照什么时候过期？")
-        >>> print(f"向量维度: {len(vector)}")
-    
-    注意:
-        - 模型会被缓存，多次调用不会重复加载
-        - 返回的向量已归一化，适合余弦相似度计算
-    """
-    service = EmbeddingService.get_instance(model_name)
-    return service.embed_chunk(query)
+def _build_summary_record(
+    concluded_content: str,
+    *,
+    conversation_id: str,
+    turn_id: int,
+    speaker: str,
+    timestamp: str,
+    chunk_version: int,
+    source: str | None,
+) -> ChunkRecord:
+    normalized = normalize_text(concluded_content)
+    participants = [speaker] if speaker else []
+    intent = detect_intent_tag(normalized)
+    prefix = build_context_prefix(timestamp, participants, intent)
+    text = prefix + normalized
 
+    if source == "summary":
+        chunk_id = deterministic_summary_chunk_id(
+            conversation_id=conversation_id,
+            turn_start=turn_id,
+            turn_end=turn_id,
+            chunk_version=chunk_version,
+            source=source,
+        )
+    else:
+        chunk_id = deterministic_chunk_id(
+            conversation_id=conversation_id,
+            turn_start=turn_id,
+            turn_end=turn_id,
+            chunk_version=chunk_version,
+        )
 
-def load_events_from_jsonl(path: str) -> List[MemoryEvent]:
-    events: List[MemoryEvent] = []
-    with open(path, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            obj = json.loads(line)
-            events.append(MemoryEvent(**obj))
-    return events
+    meta = ChunkMetadata(
+        conversation_id=conversation_id,
+        turn_start=turn_id,
+        turn_end=turn_id,
+        timestamp_start=parse_time(timestamp),
+        timestamp_end=parse_time(timestamp),
+        participants=participants,
+        intent_tag=intent,
+        source=source,
+        chunk_version=chunk_version,
+        deleted=False,
+    )
+    return ChunkRecord(chunk_id=chunk_id, text=text, metadata=meta)
 
 
 def write_memory_events(
@@ -422,60 +405,147 @@ def write_memory_events(
     return {"records": len(records), **res}
 
 
-def write_memory_events_from_jsonl(
-    path: str,
+def update_rag_vector_store(
+    action: str,
+    concluded_content: str,
     *,
+    chunk_ids: List[str] | None = None,
+    conversation_id: str | None = None,
+    turn_id: int | None = None,
+    speaker: str | None = None,
+    timestamp: str | None = None,
+    correct_behavior: str = "replace",
+    source: str | None = None,
     persist_dir: str = ".vector_store",
     embed_model: str = "BAAI/bge-small-zh-v1.5",
-    chunk_cfg: Optional[ChunkingConfig] = None,
-    batch_size: int = 32,
-) -> Dict[str, Any]:
+) -> RAGUpdateResult:
     """
-    Tool入口：从 JSONL 读取 MemoryEvent 并写入向量库。
+    Tool入口：新增/修正 RAG 向量库中的 summary chunk。
     """
-    events = load_events_from_jsonl(path)
-    return write_memory_events(
-        events,
-        persist_dir=persist_dir,
-        embed_model=embed_model,
-        chunk_cfg=chunk_cfg,
-        batch_size=batch_size,
-    )
+    result = RAGUpdateResult()
+    action = action.strip()
+    if action not in {"Add", "Correct"}:
+        raise ValueError("action must be 'Add' or 'Correct'")
 
+    if not concluded_content or not concluded_content.strip():
+        raise ValueError("concluded_content cannot be empty")
 
-def main() -> None:
-    # Windows 终端常见编码导致中文日志乱码；尽量强制 UTF-8 输出方便调试
-    try:
-        sys.stdout.reconfigure(encoding="utf-8")
-        sys.stderr.reconfigure(encoding="utf-8")
-    except Exception:
-        pass
+    svc = SQLiteVectorStoreService(VectorStoreConfig(persist_dir=persist_dir))
+    embed_service = EmbeddingService.get_instance(embed_model)
 
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--events_jsonl", required=True, help="输入事件 JSONL（每行一个 MemoryEvent）")
-    ap.add_argument("--persist_dir", default=".vector_store", help="向量库持久化目录（SQLite 文件会放在这里）")
-    ap.add_argument("--collection", default="user_memory_chunks", help="(兼容保留) collection 名称；SQLite实现不使用")
-    ap.add_argument("--embed_model", default="BAAI/bge-small-zh-v1.5", help="SentenceTransformer 模型名")
-    ap.add_argument("--max_chars", type=int, default=600)
-    ap.add_argument("--overlap_chars", type=int, default=80)
-    ap.add_argument("--chunk_version", type=int, default=1)
-    args = ap.parse_args()
+    if action == "Add":
+        if chunk_ids is not None:
+            raise ValueError("chunk_ids must be None when action is 'Add'")
+        if conversation_id is None or turn_id is None or speaker is None or timestamp is None:
+            raise ValueError("Add requires conversation_id, turn_id, speaker, timestamp")
 
-    events = load_events_from_jsonl(args.events_jsonl)
-    chunk_cfg = ChunkingConfig(
-        max_chars=args.max_chars,
-        overlap_chars=args.overlap_chars,
-        chunk_version=args.chunk_version,
-    )
-    res = write_memory_events(
-        events,
-        persist_dir=args.persist_dir,
-        embed_model=args.embed_model,
-        chunk_cfg=chunk_cfg,
-    )
-    print(json.dumps(res, ensure_ascii=False, indent=2))
+        record = _build_summary_record(
+            concluded_content,
+            conversation_id=conversation_id,
+            turn_id=int(turn_id),
+            speaker=speaker,
+            timestamp=timestamp,
+            chunk_version=1,
+            source=source or "summary",
+        )
+        embeddings = embed_service.embed_batch([record.text], batch_size=1)
+        res = svc.upsert_records([record], embeddings=embeddings)
+        if res.get("errors"):
+            result.errors.extend([str(e) for e in res.get("errors", [])])
+        else:
+            result.upserted_ids.append(record.chunk_id)
+        return result
 
+    # Correct
+    if not chunk_ids:
+        raise ValueError("Correct requires chunk_ids")
+    if correct_behavior not in {"overwrite", "replace"}:
+        raise ValueError("correct_behavior must be 'overwrite' or 'replace'")
 
-if __name__ == "__main__":
-    main()
+    existing = svc.fetch_records_by_chunk_ids(chunk_ids)
+    existing_map = {r.chunk_id: r for r in existing}
+
+    missing = [cid for cid in chunk_ids if cid not in existing_map]
+    if missing:
+        result.errors.append(f"chunk_ids not found: {missing}")
+
+    updated_records: List[ChunkRecord] = []
+    new_records: List[ChunkRecord] = []
+    delete_ids: List[str] = []
+
+    for cid in chunk_ids:
+        record = existing_map.get(cid)
+        if record is None:
+            continue
+        meta = record.metadata
+        normalized = normalize_text(concluded_content)
+        participants = [speaker] if speaker else meta.participants
+        intent = detect_intent_tag(normalized)
+        prefix = build_context_prefix(timestamp or meta.timestamp_start, participants, intent)
+        text = prefix + normalized
+
+        if correct_behavior == "overwrite":
+            meta.timestamp_start = parse_time(timestamp) if timestamp else meta.timestamp_start
+            meta.timestamp_end = parse_time(timestamp) if timestamp else meta.timestamp_end
+            meta.participants = participants
+            meta.intent_tag = intent
+            if source is not None:
+                meta.source = source
+            meta.deleted = False
+            updated_records.append(ChunkRecord(chunk_id=cid, text=text, metadata=meta))
+        else:
+            delete_ids.append(cid)
+            new_version = int(meta.chunk_version) + 1
+            new_source = source if source is not None else meta.source
+            if new_source == "summary":
+                new_chunk_id = deterministic_summary_chunk_id(
+                    conversation_id=meta.conversation_id,
+                    turn_start=meta.turn_start,
+                    turn_end=meta.turn_end,
+                    chunk_version=new_version,
+                    source=new_source,
+                )
+            else:
+                new_chunk_id = deterministic_chunk_id(
+                    conversation_id=meta.conversation_id,
+                    turn_start=meta.turn_start,
+                    turn_end=meta.turn_end,
+                    chunk_version=new_version,
+                )
+            new_meta = ChunkMetadata(
+                conversation_id=meta.conversation_id,
+                turn_start=meta.turn_start,
+                turn_end=meta.turn_end,
+                timestamp_start=parse_time(timestamp) if timestamp else meta.timestamp_start,
+                timestamp_end=parse_time(timestamp) if timestamp else meta.timestamp_end,
+                participants=participants,
+                intent_tag=intent,
+                source=new_source,
+                chunk_version=new_version,
+                deleted=False,
+            )
+            new_records.append(ChunkRecord(chunk_id=new_chunk_id, text=text, metadata=new_meta))
+
+    if delete_ids:
+        svc.logical_delete_by_chunk_ids(delete_ids)
+        result.deleted_ids.extend(delete_ids)
+
+    if updated_records:
+        embeddings = embed_service.embed_batch([r.text for r in updated_records])
+        res = svc.upsert_records(updated_records, embeddings=embeddings)
+        if res.get("errors"):
+            result.errors.extend([str(e) for e in res.get("errors", [])])
+        else:
+            result.updated_ids.extend([r.chunk_id for r in updated_records])
+
+    if new_records:
+        embeddings = embed_service.embed_batch([r.text for r in new_records])
+        res = svc.upsert_records(new_records, embeddings=embeddings)
+        if res.get("errors"):
+            result.errors.extend([str(e) for e in res.get("errors", [])])
+        else:
+            result.upserted_ids.extend([r.chunk_id for r in new_records])
+
+    return result
+
 
