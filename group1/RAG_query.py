@@ -70,7 +70,7 @@ class RAG_query:
         self.Jcards = jcards_db.get_Jcards_tostr()
 
 
-    def retrieve(self, query: str, embed_db: Embed_db, top_k: int = None) -> None:
+    def retrieve(self, query: str, embed_db: Embed_db, top_k: int = 5) -> None:
         """
         根据用户提示词和Jcards召回，赋值召回的片段内容给retrieved_chunks
 
@@ -134,10 +134,10 @@ class RAG_query:
         self.ask_Jcards(jcards_db)
 
         # 3. 召回相关片段
-        self.retrieve(query, embed_db)
+        self.retrieve(self.query, embed_db, 5)
 
         # 4. 重排召回结果
-        self.rerank(query)
+        self.rerank(self.query, self.retrieved_chunks, 3)
 
         return self.reranked_chunks
 
@@ -152,80 +152,5 @@ class RAG_query:
             查询向量
         """
         return group3_embed_chunk(query)
-
-    def _calculate_similarity(self, query: str, chunk: str) -> float:
-        """
-        计算查询与片段的相似度
-
-        Args:
-            query: 查询文本
-            chunk: 片段文本
-
-        Returns:
-            相似度分数
-        """
-        # 这里实现相似度计算逻辑
-        # 示例：简单的关键词匹配相似度
-        query_words = set(query.lower().split())
-        chunk_words = set(chunk.lower().split())
-
-        if not query_words:
-            return 0.0
-
-        # Jaccard相似度
-        intersection = len(query_words.intersection(chunk_words))
-        union = len(query_words.union(chunk_words))
-
-        return intersection / union if union > 0 else 0.0
-
-
-# class Agent:
-#     """
-#     Agent类，负责处理用户请求和协调各个组件
-#     """
-
-#     def __init__(self):
-#         """初始化Agent类"""
-#         self.Active: bool = False  # agent是否应该主动提醒
-#         self.Jcards: List[str] = []  # Jcards字符串集
-#         self.active_content: List[str] = []  # 从主动服务类中得到的主动服务事件卡内容
-#         self.input: str = ""  # 用户提示词
-
-#     def process_request(self, input: str, Jcards: List[str]) -> str:
-#         """
-#          接收用户输入, 将主动警示的提示词和jcards拼在一起，调用模型api
-
-#         Args:
-#             input: 用户输入
-#             Jcards: Jcards字符串列表
-
-#         Returns:
-#             模型生成的回答
-#         """
-#         pass
-
-#     # def active_service(self, active_service: Active_service) -> None:
-#     #     """
-#     #     对应图中"主动服务检查"，根据Active值判断是否警示，并实现警示逻辑。
-#     #     引用get_active函数向Active和active_content属性赋值
-
-#     #     Args:
-#     #         active_service: 主动服务实例
-#     #     """
-#     #     pass
-
-#     def Jcards_update(self, Jcards: List[str], active_content: List[str],
-#                       input: str) -> None:
-#         """
-#         将Jcards，提示词，主动服务卡全部喂给模型，让它判断是否需要更新Jcards。
-#         如果需要，则把更新内容赋值给Jcards属性，同时存储到Jcards_db。
-#         如果不需要则什么也不做
-
-#         Args:
-#             Jcards: Jcards字符串列表
-#             active_content: 主动服务卡内容
-#             input: 用户提示词
-#         """
-#         pass
 
 

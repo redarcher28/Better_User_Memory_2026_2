@@ -1,7 +1,7 @@
 from dotenv import load_dotenv
 import os
 from serpapi import SerpApiClient
-from typing import Dict, Any, List
+from typing import Dict, Any, List, TypedDict
 from datetime import datetime
 import pytz
 
@@ -108,42 +108,54 @@ def update_rag_vector_store(
     pass
 
 
+class CardContent(TypedDict, total=False):
+    """卡片内容结构化对象。title、body 为 Add/Correct 必填；tags、metadata 可选。"""
+    title: str
+    body: str
+    tags: List[str]
+    metadata: Dict[str, Any]
+
+
 def update_jcards_database(
-    action: str, card_content: str | None, number: List[int] | None
-) -> None:
+    action: str,
+    card_content: Dict[str, Any] | None,
+    card_ids: List[str] | None,
+) -> tuple[List[str], List[str], List[str], List[str]]:
     """
-    para:
-    action: str, 具体的操作类型，有:
-    {
-    "Add" : 添加新卡片, 此时number为None，card_content为卡片内容
-    "Correct" : 修改已有卡片, 此时number为需要修改的卡片的编号列表，card_content为修改后的内容
-    "Delete" : 删除卡片, 此时number为需要删除的卡片的编号列表，card_content为None
-    }
-    card_content: str | None, 卡片内容（如标题、正文、标签等元数据）。Add/Correct 时必填，Delete 时为 None
-    number: List[int] | None, 要操作（修改或删除）的卡片编号列表。Add 时为 None，Correct/Delete 时必填
+    对 Jcards 库执行添加、修改或删除；使用稳定可追溯的 card_id，避免删错/改错。
 
-    详细说明： 此函数用于Agent添加、修改或删除Jcards库中的卡片
+    参数
+    -----
+    action: str
+        "Add"：添加新卡片，此时 card_ids 为 None，card_content 必填。
+        "Correct"：修改已有卡片，card_ids 为要修改的卡片稳定 ID 列表，card_content 为替换后的内容。
+        "Delete"：删除卡片，card_ids 为要删除的卡片稳定 ID 列表，card_content 为 None。
+    card_content: dict | None
+        结构化卡片内容，Add/Correct 时必填，Delete 时为 None。建议结构：
+        - title (str)：标题，必填
+        - body (str)：正文，必填
+        - tags (list[str])：标签列表，可选
+        - metadata (dict)：扩展元数据（如 external_id 用于去重），可选
+        库内会做标准化与索引，调用方无需关心实现细节。
+    card_ids: List[str] | None
+        要操作（Correct/Delete）的卡片稳定 ID 列表，可追溯、不随排序变化。Add 时为 None；Correct/Delete 时必填。
 
-    - 添加内容：
-    如果 action 为 "Add"，则添加新卡片。
-    具体为将 card_content 解析并写入片段库/卡片库，并建立相应索引。
+    返回值
+    -----
+    tuple[List[str], List[str], List[str], List[str]]
+        (added_ids, updated_ids, deleted_ids, errors)，供 Agent 判断成功/失败。
+        - added_ids：本次 Add 成功写入的卡片 ID 列表。
+        - updated_ids：本次 Correct 成功更新的卡片 ID 列表。
+        - deleted_ids：本次 Delete 成功删除的卡片 ID 列表。
+        - errors：错误信息列表（如某 card_id 不存在、重复添加等），每项建议包含 card_id 与原因。
 
-    - 修改内容：
-    如果 action 为 "Correct"，则修改已有卡片。
-    具体为根据 number 中的编号定位待修改卡片，用 card_content 替换对应内容。
-
-    - 删除内容：
-    如果 action 为 "Delete"，则删除卡片。
-    具体为根据 number 中的编号定位并移除对应卡片。
-
-    - 修改方式：
-      1. 根据 action 与 number 确定操作对象（若为 Add 则无待操作对象）。
-      2. 对 card_content 做预处理（格式标准化、关键词提取等，仅 Add/Correct 时）。
-      3. 将结果写入 Jcards 数据库，并维护分类、索引与检索所需结构。
-    - 此函数无返回值
+    行为说明
+    -----
+    - Correct/Delete 幂等性：某 card_id 不存在时，该 id 会出现在 errors 中（如 "card_id:xxx not_found"），其它 id 照常执行；重复调用已删除或已更新的 id 可得到一致结果。
+    - Add 去重：是否允许重复由实现决定。若按 content_hash 或 metadata.external_id 判重且不允许重复，重复添加时应在 errors 中返回相应说明，调用方可根据返回值判断。
     """
-    # 函数体暂时为空，等待后续实现具体的 Jcards 库修改逻辑
-    pass
+    # 函数体暂时为空，等待后续实现具体的 Jcards 库修改逻辑；返回空结果以保持接口一致
+    return ([], [], [], [])
 
 
 #

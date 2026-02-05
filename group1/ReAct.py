@@ -10,6 +10,7 @@ from ToolExecutor import (
     update_jcards_database,
 )
 from group1 import Jcards_db, Embed_db, Active_service
+from group1.new import build_system_prompt_with_warning
 
 # 系统提示词模板
 AGENT_SYSTEM_PROMPT = """
@@ -61,7 +62,7 @@ class ReActAgent:
         )
         tool_executor.registerTool(
             "UpdateJcards",
-            "添加、修改或删除 Jcards 库中的卡片。输入为 JSON 字符串，包含 action（Add/Correct/Delete）、card_content（Add/Correct 必填）、number（Correct/Delete 必填，为卡片编号列表）。",
+            "添加、修改或删除 Jcards 库中的卡片。输入为 JSON：action（Add/Correct/Delete）；card_content 为结构化对象（title、body 必填，tags、metadata 可选），Add/Correct 时必填；card_ids 为卡片稳定 ID 列表，Correct/Delete 时必填。返回 added_ids/updated_ids/deleted_ids/errors 供判断成功与否。",
             self._wrap_update_jcards,
         )
 
@@ -120,14 +121,28 @@ class ReActAgent:
             return f"UpdateRAG 执行出错: {e}"
 
     def _wrap_update_jcards(self, tool_input: str) -> str:
-        """包装 update_jcards_database：tool_input 为 JSON，解析后调用。"""
+        """包装 update_jcards_database：tool_input 为 JSON，解析后调用并返回 added_ids/updated_ids/deleted_ids/errors。"""
         try:
             data = json.loads(tool_input.strip())
             action = data.get("action")
             card_content = data.get("card_content")
-            number = data.get("number")
-            update_jcards_database(action=action, card_content=card_content, number=number)
-            return "Jcards 已更新。"
+            card_ids = data.get("card_ids")
+            result = update_jcards_database(
+                action=action, card_content=card_content, card_ids=card_ids
+            )
+            if result is None:
+                return "Jcards 已更新（具体实现待后续补齐）。"
+            added_ids, updated_ids, deleted_ids, errors = result
+            parts = []
+            if added_ids:
+                parts.append(f"added_ids: {added_ids}")
+            if updated_ids:
+                parts.append(f"updated_ids: {updated_ids}")
+            if deleted_ids:
+                parts.append(f"deleted_ids: {deleted_ids}")
+            if errors:
+                parts.append(f"errors: {errors}")
+            return "; ".join(parts) if parts else "Jcards 已更新。"
         except json.JSONDecodeError as e:
             return f"UpdateJcards 输入不是合法 JSON: {e}"
         except Exception as e:
@@ -160,8 +175,9 @@ class ReActAgent:
                 f"当前 Jcards 列表：\n{jcards_str}\n\n主动警示：\n{active_str}\n\n---\n对话历史：\n"
             )
 
-            # route: 1-1-1 返回系统 prompt
-            system_prompt = AGENT_SYSTEM_PROMPT.format(tools=self.tool_executor.getAvailableTools())
+            # route: 1-1-1 返回系统 prompt（带警示级别拼装）
+            base_system_prompt = AGENT_SYSTEM_PROMPT.format(tools=self.tool_executor.getAvailableTools())
+            system_prompt = build_system_prompt_with_warning(question, jcards_list, base_system_prompt)
             prompt = context_prefix + "\n".join(self.history)
 
             messages = [
