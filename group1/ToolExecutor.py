@@ -1,6 +1,8 @@
 from dotenv import load_dotenv
 import os
 from typing import Dict, Any, List, TypedDict
+from datetime import datetime
+import hashlib
 
 import sympy as sp
 import numpy as np
@@ -12,6 +14,8 @@ load_dotenv()
 # 引用同目录下 group1 模块中的 RAG 查询与数据库接口（与 group1.py 同目录，直接 import group1）
 
 from RAG_query import Jcards_db, Embed_db, RAG_query
+from group3.rag_ingest_incremental import update_rag_vector_store as group3_update_rag_vector_store
+from jcards import get_jcard_service, Jcard, JcardStatus, SourceRef, CardWriteOps, WriteOpType
 
 
 def get_rag_history(
@@ -99,8 +103,25 @@ def update_rag_vector_store(
       3. Correct 时按 correct_behavior 执行覆盖或逻辑删除+插入。
       4. 返回元组 (upserted_ids, updated_ids, deleted_ids, errors)，供 Agent 判断是否执行成功。
     """
-    # 函数体暂时为空，等待后续实现具体的向量库修改逻辑
-    pass
+    try:
+        result = group3_update_rag_vector_store(
+            action=action,
+            concluded_content=concluded_content,
+            chunk_ids=chunk_ids,
+            conversation_id=conversation_id,
+            turn_id=turn_id,
+            speaker=speaker,
+            timestamp=timestamp,
+            correct_behavior=correct_behavior,
+        )
+        return (
+            result.upserted_ids,
+            result.updated_ids,
+            result.deleted_ids,
+            result.errors,
+        )
+    except Exception as exc:
+        return ([], [], [], [str(exc)])
 
 
 class CardContent(TypedDict, total=False):
@@ -149,8 +170,124 @@ def update_jcards_database(
     - Correct/Delete 幂等性：某 card_id 不存在时，该 id 会出现在 errors 中（如 "card_id:xxx not_found"），其它 id 照常执行；重复调用已删除或已更新的 id 可得到一致结果。
     - Add 去重：是否允许重复由实现决定。若按 content_hash 或 metadata.external_id 判重且不允许重复，重复添加时应在 errors 中返回相应说明，调用方可根据返回值判断。
     """
-    # 函数体暂时为空，等待后续实现具体的 Jcards 库修改逻辑；返回空结果以保持接口一致
-    return ([], [], [], [])
+    def _build_jcard(content: Dict[str, Any]) -> Jcard:
+        title = str(content.get("title", "")).strip()
+        body = str(content.get("body", "")).strip()
+        if not title or not body:
+            raise ValueError("card_content requires non-empty title and body")
+
+        tags = content.get("tags") or []
+        metadata = content.get("metadata") or {}
+
+        person = metadata.get("person") or metadata.get("user") or metadata.get("username") or "用户"
+        fact_key = metadata.get("fact_key") or title
+
+        value = {"title": title, "body": body}
+        if tags:
+            value["tags"] = tags
+        if metadata:
+            value["metadata"] = metadata
+
+        relationship = metadata.get("relationship") or ""
+        backstory = metadata.get("backstory") or ""
+
+        conversation_id = metadata.get("conversation_id") or metadata.get("conv_id") or "conv_unknown"
+        turn_id = metadata.get("turn_id") or 0
+        speaker = metadata.get("speaker") or "user"
+        ts_raw = metadata.get("timestamp")
+        if ts_raw:
+            try:
+                ts = datetime.fromisoformat(str(ts_raw))
+            except Exception:
+                ts = datetime.now()
+        else:
+            ts = datetime.now()
+
+        source_ref = SourceRef(
+            conversation_id=str(conversation_id),
+            turn_id=int(turn_id),
+            speaker=str(speaker),
+            timestamp=ts,
+        )
+
+        card_id = metadata.get("card_id")
+        if not card_id:
+            raw = f"{conversation_id}|{turn_id}|{title}|{body}".encode("utf-8")
+            card_id = "card_" + hashlib.sha1(raw).hexdigest()
+
+        now = datetime.now()
+        return Jcard(
+            card_id=str(card_id),
+            fact_key=str(fact_key),
+            value=value,
+            content=f"{title}\n{body}".strip(),
+            backstory=str(backstory),
+            person=str(person),
+            relationship=str(relationship),
+            status=JcardStatus.ACTIVE,
+            confidence=float(metadata.get("confidence", 0.6)),
+            source_ref=source_ref,
+            created_at=now,
+            updated_at=now,
+        )
+
+    action_norm = (action or "").strip().lower()
+    added_ids: List[str] = []
+    updated_ids: List[str] = []
+    deleted_ids: List[str] = []
+    errors: List[str] = []
+
+    service = get_jcard_service()
+
+    if action_norm == "add":
+        if not card_content:
+            return ([], [], [], ["card_content is required for Add"])
+        try:
+            jcard = _build_jcard(card_content)
+            ops = CardWriteOps(op=WriteOpType.UPSERT, card=jcard)
+            result = service.apply_card_write_ops(ops)
+            if result.applied:
+                added_ids.extend(result.upserted_ids or [])
+                updated_ids.extend(result.updated_ids or [])
+            if result.errors:
+                errors.extend(result.errors)
+        except Exception as exc:
+            errors.append(str(exc))
+
+    elif action_norm == "correct":
+        if not card_content or not card_ids:
+            return ([], [], [], ["card_content and card_ids are required for Correct"])
+        for cid in card_ids:
+            try:
+                jcard = _build_jcard(card_content)
+                ops = CardWriteOps(op=WriteOpType.CORRECT, card=jcard, target_card_id=cid)
+                result = service.apply_card_write_ops(ops)
+                if result.applied:
+                    added_ids.extend(result.upserted_ids or [])
+                    updated_ids.extend(result.updated_ids or [])
+                    deleted_ids.extend(result.deleted_ids or [])
+                if result.errors:
+                    errors.extend(result.errors)
+            except Exception as exc:
+                errors.append(str(exc))
+
+    elif action_norm == "delete":
+        if not card_ids:
+            return ([], [], [], ["card_ids is required for Delete"])
+        for cid in card_ids:
+            try:
+                ok = service.repository.deactivate(cid, expected_version=None)
+                if ok:
+                    deleted_ids.append(cid)
+                else:
+                    errors.append(f"card_id not found: {cid}")
+            except Exception as exc:
+                errors.append(str(exc))
+
+    else:
+        errors.append("action must be Add, Correct, or Delete")
+
+    return (added_ids, updated_ids, deleted_ids, errors)
 
 
 #

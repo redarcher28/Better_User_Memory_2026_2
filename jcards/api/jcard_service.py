@@ -1,5 +1,6 @@
 
 from typing import Optional, Dict, Any
+import json
 from ..core.models import *
 from ..storage.jcard_repository import JcardRepository
 
@@ -166,6 +167,26 @@ class JcardService:
         )
         
         return result
+
+    def get_Jcards_to_string(self, request: GetJcardsRequest) -> str:
+        """
+        返回符合请求条件的 Jcards JSON 字符串（供 RAG_query 使用）。
+        """
+        statuses = [JcardStatus.ACTIVE]
+        if request.include_superseded:
+            statuses.append(JcardStatus.SUPERSEDED)
+        if request.include_uncertain:
+            statuses.append(JcardStatus.UNCERTAIN)
+
+        query = JcardQuery(
+            person=request.person,
+            fact_keys=request.fact_keys,
+            status_in=statuses,
+            min_confidence=request.min_confidence,
+        )
+        cards = self.repository.query(query)
+        views = [JcardView.from_jcard(c).to_dict() for c in cards]
+        return json.dumps(views, ensure_ascii=False)
     
     # -------------------- 接口2：logical_delete_cards --------------------
     def logical_delete_cards(self, request: DeleteRequest) -> DeleteResult:

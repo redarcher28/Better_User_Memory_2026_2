@@ -19,7 +19,7 @@ import hashlib
 import json
 import sqlite3
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -35,6 +35,7 @@ class ChunkMetadata(BaseModel):
     timestamp_end: str | None = None
     participants: list[str] = Field(default_factory=list)
     intent_tag: str | None = None
+    source: str | None = None
     chunk_version: int = 1
     deleted: bool = False
 
@@ -59,9 +60,17 @@ def deterministic_chunk_id(
     return "chk_" + hashlib.sha1(raw).hexdigest()  # short enough, deterministic
 
 
+def _default_persist_dir() -> str:
+    root = Path(__file__).resolve().parents[1]
+    return str(root / ".vector_store")
+
+
+DEFAULT_VECTOR_STORE_DIR = _default_persist_dir()
+
+
 @dataclass
 class VectorStoreConfig:
-    persist_dir: str = ".vector_store"
+    persist_dir: str = field(default_factory=_default_persist_dir)
     db_file: str = "vector_store.sqlite3"
 
 
@@ -203,6 +212,21 @@ class SQLiteVectorStoreService:
             "filters": where,
             "hits": [h.model_dump() for h in hits],
         }
+
+    def fetch_records_by_chunk_ids(self, chunk_ids: List[str]) -> List[ChunkRecord]:
+        if not chunk_ids:
+            return []
+        placeholders = ",".join(["?"] * len(chunk_ids))
+        sql = (
+            "SELECT chunk_id, text, metadata_json FROM chunks "
+            f"WHERE chunk_id IN ({placeholders})"
+        )
+        rows = self._conn.execute(sql, chunk_ids).fetchall()
+        records: List[ChunkRecord] = []
+        for chunk_id, text, meta_json in rows:
+            meta = json.loads(meta_json)
+            records.append(ChunkRecord(chunk_id=chunk_id, text=text, metadata=ChunkMetadata(**meta)))
+        return records
 
     def logical_delete_by_chunk_ids(self, chunk_ids: List[str]) -> Dict[str, Any]:
         if not chunk_ids:

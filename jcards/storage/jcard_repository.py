@@ -1,6 +1,8 @@
 import uuid
 import threading
 import copy
+import json
+from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple, Set, Any, Iterator
 from contextlib import contextmanager
@@ -42,6 +44,44 @@ class JcardRepository:
         
         # 当前事务状态栈
         self._transaction_stack: List[TransactionState] = []
+
+        # 持久化文件路径（项目根目录下）
+        self._persist_path = self._default_persist_path()
+        self._load_from_disk()
+
+    def _default_persist_path(self) -> Path:
+        root = Path(__file__).resolve().parents[2]
+        return root / ".jcards_store.json"
+
+    def _load_from_disk(self) -> None:
+        if not self._persist_path.exists():
+            return
+        try:
+            data = json.loads(self._persist_path.read_text(encoding="utf-8"))
+            cards = {}
+            for item in data.get("cards", []):
+                card = Jcard.from_dict(item)
+                cards[card.card_id] = card
+            self._cards = cards
+            self._rebuild_all_indices()
+        except Exception:
+            # 失败时不阻塞启动，保留空库
+            self._cards = {}
+            self._person_fact_index = {}
+            for status in JcardStatus:
+                if status in self._status_index:
+                    self._status_index[status].clear()
+
+    def _persist(self) -> None:
+        payload = {"cards": [c.to_dict() for c in self._cards.values()]}
+        tmp_path = self._persist_path.with_suffix(".tmp")
+        tmp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp_path.replace(self._persist_path)
+
+    def _persist_if_needed(self) -> None:
+        if self._transaction_stack:
+            return
+        self._persist()
     
     # ========== 事务支持 ==========
     
@@ -69,6 +109,7 @@ class JcardRepository:
             if not self._transaction_stack:
                 raise RuntimeError("No transaction to commit")
             self._transaction_stack.pop()
+            self._persist()
     
     def rollback_transaction(self):
         """回滚事务"""
@@ -141,6 +182,7 @@ class JcardRepository:
             # 更新索引和存储
             self._update_indexes(jcard)
             self._cards[jcard.card_id] = jcard
+            self._persist_if_needed()
             
             return jcard.card_id
     
@@ -337,7 +379,7 @@ class JcardRepository:
             
             # 更新索引
             self._update_indexes(old_card)
-            
+            self._persist_if_needed()
             return True
     
     def logical_delete(self, card_ids: List[str]) -> int:
@@ -358,6 +400,7 @@ class JcardRepository:
                     card.version += 1
                     self._update_indexes(card)
                     deleted_count += 1
+            self._persist_if_needed()
             
             return deleted_count
     
@@ -400,7 +443,7 @@ class JcardRepository:
             
             # 更新索引
             self._update_indexes(card)
-            
+            self._persist_if_needed()
             return True
     
     def logical_delete_by_source(
@@ -432,7 +475,7 @@ class JcardRepository:
                     card.version += 1
                     self._update_indexes(card)
                     deleted_count += 1
-            
+            self._persist_if_needed()
             return deleted_count
     
     def get_all_active(self) -> List[Jcard]:
@@ -518,3 +561,15 @@ class JcardRepository:
             for status in JcardStatus:
                 self._status_index[status].clear()
             self._transaction_stack.clear()
+            self._persist()
+
+    def _rebuild_all_indices(self):
+        """重建全部索引（用于从磁盘加载后）"""
+        self._person_fact_index = {}
+        for status in JcardStatus:
+            if status not in self._status_index:
+                self._status_index[status] = []
+            else:
+                self._status_index[status].clear()
+        for card in self._cards.values():
+            self._add_to_indices(card)
