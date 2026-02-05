@@ -1,0 +1,39 @@
+{
+  "cards": [
+    {
+      "card_id": "card_78a95633987fa9d21ebca1a4f20c693f6eb788bf",
+      "fact_key": "用户张三的个人信息",
+      "value": {
+        "title": "用户张三的个人信息",
+        "body": "姓名：张三\n过敏原：花生（严重过敏）\n食物偏好：喜欢西瓜",
+        "tags": [
+          "用户信息",
+          "过敏",
+          "食物偏好"
+        ],
+        "metadata": {
+          "记录时间": "当前对话",
+          "信息类型": "个人健康与偏好"
+        }
+      },
+      "content": "用户张三的个人信息\n姓名：张三\n过敏原：花生（严重过敏）\n食物偏好：喜欢西瓜",
+      "backstory": "",
+      "person": "用户",
+      "relationship": "",
+      "status": "active",
+      "confidence": 0.6,
+      "source_ref": {
+        "conversation_id": "conv_unknown",
+        "turn_id": 0,
+        "speaker": "user",
+        "timestamp": "2026-02-05T20:31:49.032886"
+      },
+      "created_at": "2026-02-05T20:31:49.032913",
+      "updated_at": "2026-02-05T20:31:49.032913",
+      "event_id": "conv_unknown_0_user_1770294709",
+      "version": 0,
+      "superseded_by": null,
+      "deleted": false
+    }
+  ]
+}

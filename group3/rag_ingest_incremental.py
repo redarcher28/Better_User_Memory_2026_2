@@ -33,6 +33,7 @@ from .rag_vector_store import (
     ChunkRecord,
     VectorStoreConfig,
     deterministic_chunk_id,
+    DEFAULT_VECTOR_STORE_DIR,
 )
 
 
@@ -278,9 +279,9 @@ class EmbeddingService:
     def _load_model(self) -> None:
         """加载 embedding 模型（懒加载）。支持 HF 镜像与本地路径。"""
         if self._model is None or self._model_name != self.model_name:
-            # 若无法直连 Hugging Face，可设置 USE_HF_MIRROR=1 或 HF_ENDPOINT=https://hf-mirror.com
+            # 若无法直连 Hugging Face，可设置 USE_HF_MIRROR=1 或 HF_ENDPOINT=https://mirrors.tuna.tsinghua.edu.cn/hugging-face
             if os.environ.get("USE_HF_MIRROR", "").lower() in ("1", "true", "yes"):
-                os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
+                os.environ.setdefault("HF_ENDPOINT", "https://mirrors.tuna.tsinghua.edu.cn/hugging-face")
             # 优先使用本地路径，避免联网
             model_path = os.environ.get("EMBED_MODEL_PATH", self.model_name)
             print(f"Loading embedding model: {model_path}...", file=sys.stderr)
@@ -419,8 +420,8 @@ def _build_summary_record(
 def write_memory_events(
     events: Iterable[MemoryEvent | Dict[str, Any]],
     *,
-    persist_dir: str = ".vector_store",
-    embed_model: str = "BAAI/bge-small-zh-v1.5",
+    persist_dir: str = DEFAULT_VECTOR_STORE_DIR,
+    embed_model: str = "shibing624/text2vec-base-chinese",
     chunk_cfg: Optional[ChunkingConfig] = None,
     batch_size: int = 32,
 ) -> Dict[str, Any]:
@@ -464,8 +465,8 @@ def update_rag_vector_store(
     timestamp: str | None = None,
     correct_behavior: str = "replace",
     source: str | None = None,
-    persist_dir: str = ".vector_store",
-    embed_model: str = "BAAI/bge-small-zh-v1.5",
+    persist_dir: str = DEFAULT_VECTOR_STORE_DIR,
+    embed_model: str = "shibing624/text2vec-base-chinese",
 ) -> RAGUpdateResult:
     """
     Tool入口：新增/修正 RAG 向量库中的 summary chunk。

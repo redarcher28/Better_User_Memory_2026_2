@@ -156,6 +156,14 @@ class JcardView:
         data = asdict(self)
         data['status'] = self.status.value
         data['updated_at'] = self.updated_at.isoformat()
+        # 处理 source_ref 的时间戳序列化
+        if isinstance(self.source_ref, SourceRef):
+            data['source_ref'] = self.source_ref.to_dict()
+        else:
+            sr = data.get('source_ref')
+            if isinstance(sr, dict) and isinstance(sr.get('timestamp'), datetime):
+                sr['timestamp'] = sr['timestamp'].isoformat()
+                data['source_ref'] = sr
         return data
 
 

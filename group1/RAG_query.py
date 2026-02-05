@@ -11,7 +11,7 @@ from group3.rag_ingest_incremental import embed_chunk as group3_embed_chunk
 from jcards import get_jcard_service, GetJcardsRequest
 
 # 导入 group3 向量库和嵌入服务
-from group3.rag_vector_store import SQLiteVectorStoreService, VectorStoreConfig
+from group3.rag_vector_store import SQLiteVectorStoreService, VectorStoreConfig, DEFAULT_VECTOR_STORE_DIR
 from group3.rag_ingest_incremental import EmbeddingService
 
 
@@ -71,7 +71,7 @@ class RAG_write:
 class Embed_db:
     """向量数据库接口类"""
 
-    def __init__(self, persist_dir: str = ".vector_store"):
+    def __init__(self, persist_dir: str = DEFAULT_VECTOR_STORE_DIR):
         """
         初始化向量数据库服务
         
