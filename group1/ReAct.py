@@ -1,5 +1,7 @@
 import re
 import json
+import uuid
+from datetime import datetime
 from typing import List, Optional
 
 from LLMCompatibleClient import LLMCompatibleClient
@@ -42,13 +44,14 @@ AGENT_SYSTEM_PROMPT = """
 可用工具如下:
 {tools}
 
+
 请严格按照以下格式进行回应:
 
 Thought: 你的思考过程，用于分析问题、拆解任务和规划下一步行动。
-Action: 你决定采取的行动，必须是以下格式之一:
+Step: 你决定采取的步骤，必须是以下格式之一:
 - `tool_name[tool_input]`: 调用一个可用工具。其中 GetRAGHistory 的 tool_input 为查询字符串；UpdateRAG 与 UpdateJcards 的 tool_input 为 JSON 字符串（见上方工具说明）。
 - `Finish[最终答案]`: 当你认为已经获得最终答案时。
-- 当你收集到足够的信息，能够回答用户的最终问题时，你必须在 Action: 字段后使用 `Finish["..."]` 来输出最终答案。
+- 当你收集到足够的信息，能够回答用户的最终问题时，你必须在 Step: 字段后使用 `Finish["..."]` 来输出最终答案。
 
 现在，请开始吧！
 """
@@ -73,7 +76,7 @@ class ReActAgent:
         self.max_steps = max_steps
         self.history: List[str] = []
 
-        # 注册三个包装后的工具（单字符串入参，供 ReAct Action 调用）
+        # 注册三个包装后的工具（单字符串入参，供 ReAct Step 调用）
         tool_executor.registerTool(
             "GetRAGHistory",
             "从 RAG 中检索与查询相关的历史对话片段。输入为查询字符串（当前问题或关键词）。",
@@ -81,12 +84,32 @@ class ReActAgent:
         )
         tool_executor.registerTool(
             "UpdateRAG",
-            "添加或修改 RAG 向量库中的聊天记录。输入为 JSON 字符串，包含 action（Add/Correct）、concluded_content；Add 时需 conversation_id、turn_id、speaker、timestamp；Correct 时需 chunk_ids，可选 correct_behavior（replace/overwrite）。",
+            """
+            添加或修改 RAG 向量库中的聊天记录。输入为 JSON 字符串。
+            **模型只需提供**（必须严格遵守）：
+            - action：字符串，"Add" 或 "Correct"。
+            - concluded_content：字符串。Add 为新增对话内容，Correct 为替换后的正确内容。
+            - chunk_ids：Correct 时**必填**（要修改的 chunk 可追溯 ID 列表）；Add 时省略或 []。
+            - correct_behavior：仅 Correct 时有效，可选 "replace"（默认）或 "overwrite"。
+            **由系统在工具内自动生成，模型请勿填写或虚构**：conversation_id、turn_id、speaker、timestamp（Add 时由工具包自动补全）。
+            示例（Add）：{"action":"Add","concluded_content":"用户说：今天天气不错"}
+            示例（Correct）：{"action":"Correct","concluded_content":"修正后的内容","chunk_ids":["chunk_abc"]}
+            """,
             self._wrap_update_rag,
         )
         tool_executor.registerTool(
             "UpdateJcards",
-            "添加、修改或删除 Jcards 库中的卡片。输入为 JSON：action（Add/Correct/Delete）；card_content 为结构化对象（title、body 必填，tags、metadata 可选），Add/Correct 时必填；card_ids 为卡片稳定 ID 列表，Correct/Delete 时必填。返回 added_ids/updated_ids/deleted_ids/errors 供判断成功与否。",
+            """
+            添加、修改或删除 Jcards 库中的卡片。输入为 JSON 字符串。
+            **模型只需提供**（必须严格遵守）：
+            - action：字符串，"Add"、"Correct" 或 "Delete"。
+            - card_content：Add/Correct 时**必填**，Delete 时省略或 null。仅包含 title（必填）、body（必填）、tags（可选）。
+            - card_ids：Correct/Delete 时**必填**（要修改或删除的卡片稳定 ID 列表）；Add 时省略或 []。
+            **由系统在工具内自动生成，模型请勿填写或虚构**：card_content 内的 metadata（如 external_id 等由工具包自动补全）。
+            示例（Add）：{"action":"Add","card_content":{"title":"待办","body":"完成报告"}}
+            示例（Correct）：{"action":"Correct","card_content":{"title":"新标题","body":"新正文"},"card_ids":["card_001"]}
+            示例（Delete）：{"action":"Delete","card_ids":["card_001","card_002"]}
+            """,
             self._wrap_update_jcards,
         )
 
@@ -99,23 +122,39 @@ class ReActAgent:
                 embed_db=self.embed_db,
             )
             if isinstance(chunks, list):
+                # chunks 是列表，需要将列表中的字符串拼接起来
                 return "\n".join(chunks) if chunks else "（未检索到相关历史片段。）"
             return str(chunks)
         except Exception as e:
             return f"RAG 查询出错: {e}"
 
     def _wrap_update_rag(self, tool_input: str) -> str:
-        """包装 update_rag_vector_store：tool_input 为 JSON，解析后调用并返回结果描述。"""
+        """包装 update_rag_vector_store：tool_input 为 JSON，解析后调用；conversation_id/turn_id/speaker/timestamp 由系统在 Add 时自动补全。"""
         try:
             data = json.loads(tool_input.strip())
             action = data.get("action")
             concluded_content = data.get("concluded_content", "")
-            chunk_ids = data.get("chunk_ids")
-            conversation_id = data.get("conversation_id")
-            turn_id = data.get("turn_id")
-            speaker = data.get("speaker")
-            timestamp = data.get("timestamp")
+            chunk_ids = data.get("chunk_ids", [])
             correct_behavior = data.get("correct_behavior", "replace")
+            # 以下字段由系统在工具内生成，模型不必提供
+            conversation_id = data.get("conversation_id") or ""
+            turn_id = data.get("turn_id")
+            speaker = data.get("speaker") or ""
+            timestamp = data.get("timestamp") or ""
+            if action == "Add":
+                if not conversation_id:
+                    conversation_id = str(uuid.uuid4())
+                if turn_id is None or turn_id == "":
+                    turn_id = 1
+                else:
+                    try:
+                        turn_id = int(turn_id)
+                    except (TypeError, ValueError):
+                        turn_id = 1
+                if not speaker:
+                    speaker = "user"
+                if not timestamp:
+                    timestamp = datetime.now().isoformat()
             result = update_rag_vector_store(
                 action=action,
                 concluded_content=concluded_content,
@@ -145,12 +184,15 @@ class ReActAgent:
             return f"UpdateRAG 执行出错: {e}"
 
     def _wrap_update_jcards(self, tool_input: str) -> str:
-        """包装 update_jcards_database：tool_input 为 JSON，解析后调用并返回 added_ids/updated_ids/deleted_ids/errors。"""
+        """包装 update_jcards_database：tool_input 为 JSON，解析后调用；card_content.metadata 由系统在需要时自动补全。"""
         try:
             data = json.loads(tool_input.strip())
             action = data.get("action")
             card_content = data.get("card_content")
             card_ids = data.get("card_ids")
+            # metadata 由系统生成，模型不必提供；若未提供则由工具包补全
+            if card_content and isinstance(card_content, dict) and "metadata" not in card_content:
+                card_content = {**card_content, "metadata": {"external_id": str(uuid.uuid4())}}
             result = update_jcards_database(
                 action=action, card_content=card_content, card_ids=card_ids
             )
@@ -171,10 +213,12 @@ class ReActAgent:
             return f"UpdateJcards 输入不是合法 JSON: {e}"
         except Exception as e:
             return f"UpdateJcards 执行出错: {e}"
+            
     def _process_single_turn(
         self, question: str, history_prefix: Optional[List[str]] = None
     ) -> Optional[str]:
-        """执行单次推理循环：对当前问题运行 ReAct 步骤直至 Finish 或达到最大步数。
+        """
+        执行单次推理循环：对当前问题运行 ReAct 步骤直至 Finish 或达到最大步数。
         若提供 history_prefix，会拼在当前轮之前，用于多轮对话上下文。
         返回最终答案字符串，或 None（未得到答案/出错/达最大步数）。
         """
@@ -237,14 +281,14 @@ class ReActAgent:
             if thought:
                 print(f"🤔 思考: {thought}")
             else:
-                print("警告：未能解析出有效的Action，流程终止。")
+                print("警告：未能解析出有效的 Step，流程终止。")
                 # #region agent log
                 _log_debug("debug-session", "run1", "D", "ReAct.py:210", "没有解析出 thought，提前 break", {})
                 # #endregion
                 break
             if action is None:
                 self.history.append(
-                    "Observation: 未能解析出 Action，请按格式输出 Action: tool_name[tool_input] 或 Finish[答案]。"
+                    "Observation: 未能解析出 Step，请按格式输出 Step: tool_name[tool_input] 或 Finish[答案]。"
                 )
                 # #region agent log
                 _log_debug("debug-session", "run1", "D", "ReAct.py:213", "action 为 None，继续循环", {})
@@ -261,7 +305,7 @@ class ReActAgent:
 
             tool_name, tool_input = self._parse_action(action)
             if not tool_name or tool_input is None:
-                self.history.append("Observation: 无效的Action格式，请检查。")
+                self.history.append("Observation: 无效的 Step 格式，请检查。")
                 continue
             tool_input = tool_input.strip()
             if not tool_input:
@@ -327,10 +371,12 @@ class ReActAgent:
                 print(f"\n🤖 Agent：{result}\n")
             else:
                 print("\n🤖 Agent：（本轮未能得到答案，您可以继续提问。）\n")
+
+
     # route: 1-1-3 将模型的thought和action从模型输出text中分离出来，返回thought, action
     def _parse_output(self, text: str):
         thought_match = re.search(r"Thought: (.*)", text)
-        action_match = re.search(r"Action: (.*)", text)
+        action_match = re.search(r"Step: (.*)", text)
         thought = thought_match.group(1).strip() if thought_match else None
         action = action_match.group(1).strip() if action_match else None
         return thought, action
@@ -418,6 +464,7 @@ if __name__ == "__main__":
             print("[DEBUG] 程序执行完成")
         else:
             agent.start_interactive_session()
+            
     except Exception as e:
         error_msg = f"[FATAL ERROR] 程序执行出错: {e}\n{traceback.format_exc()}"
         print(error_msg)

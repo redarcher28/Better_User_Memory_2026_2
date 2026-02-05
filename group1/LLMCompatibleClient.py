@@ -39,7 +39,8 @@ class LLMCompatibleClient:
         """
         print(f"🧠 正在调用 {self.model} 模型...")
         try:
-
+            # TODO: 添加的调试性内容，后续需要删除
+            print(f"\n\n发给模型的实际内容: {messages}\n\n")
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,
