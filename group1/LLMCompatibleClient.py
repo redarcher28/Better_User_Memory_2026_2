@@ -65,7 +65,12 @@ class LLMCompatibleClient:
 # --- 客户端使用示例 ---
 if __name__ == '__main__':
     try:
-        llmClient = LLMCompatibleClient()
+        llmClient = LLMCompatibleClient(
+            model="deepseek-chat",
+            apiKey="sk-55950ea43bc44fb58e5379fc9f2c1d2a",
+            baseUrl="https://api.deepseek.com",
+            timeout=60
+        )
 
         exampleMessages = [
             {"role": "system", "content": "You are a helpful assistant that writes Python code."},

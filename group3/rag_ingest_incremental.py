@@ -6,7 +6,7 @@
 - 读取对话事件（JSONL/JSON）后，生成 ChunkRecord 并 upsert 到向量库服务模块。
 
 默认选型（可替换）：
-- embedding: sentence-transformers (BAAI/bge-small-zh-v1.5)
+- embedding: sentence-transformers (shibing624/text2vec-base-chinese)
 - vector store: Chroma persistent (see rag_vector_store.py)
 """
 
@@ -26,7 +26,7 @@ from dateutil import parser as dtparser
 from pydantic import BaseModel, Field
 from sentence_transformers import SentenceTransformer
 
-from rag_vector_store import (
+from .rag_vector_store import (
     SQLiteVectorStoreService,
     ChunkMetadata,
     ChunkRecord,
@@ -262,28 +262,33 @@ class EmbeddingService:
     
     _instance: Optional['EmbeddingService'] = None
     _model: Optional[SentenceTransformer] = None
-    _model_name: str = "BAAI/bge-small-zh-v1.5"
+    _model_name: str = "shibing624/text2vec-base-chinese"
     
-    def __init__(self, model_name: str = "BAAI/bge-small-zh-v1.5"):
+    def __init__(self, model_name: str = "shibing624/text2vec-base-chinese"):
         """
         初始化向量化服务
         
         参数:
-            model_name: SentenceTransformer模型名称（默认: BAAI/bge-small-zh-v1.5）
+            model_name: SentenceTransformer模型名称（默认: shibing624/text2vec-base-chinese）
         """
         self.model_name = model_name
         self._load_model()
     
     def _load_model(self) -> None:
-        """加载embedding模型（懒加载）"""
+        """加载 embedding 模型（懒加载）。支持 HF 镜像与本地路径。"""
         if self._model is None or self._model_name != self.model_name:
-            print(f"Loading embedding model: {self.model_name}...", file=sys.stderr)
-            self._model = SentenceTransformer(self.model_name)
-            self._model_name = self.model_name
-            print(f"Model loaded successfully.", file=sys.stderr)
+            # 若无法直连 Hugging Face，可设置 USE_HF_MIRROR=1 或 HF_ENDPOINT=https://hf-mirror.com
+            if os.environ.get("USE_HF_MIRROR", "").lower() in ("1", "true", "yes"):
+                os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
+            # 优先使用本地路径，避免联网
+            model_path = os.environ.get("EMBED_MODEL_PATH", self.model_name)
+            print(f"Loading embedding model: {model_path}...", file=sys.stderr)
+            self._model = SentenceTransformer(model_path)
+            self._model_name = model_path
+            print("Model loaded successfully.", file=sys.stderr)
     
     @classmethod
-    def get_instance(cls, model_name: str = "BAAI/bge-small-zh-v1.5") -> 'EmbeddingService':
+    def get_instance(cls, model_name: str = "shibing624/text2vec-base-chinese") -> 'EmbeddingService':
         """
         获取单例实例（避免重复加载模型）
         
@@ -296,6 +301,35 @@ class EmbeddingService:
         if cls._instance is None or cls._instance.model_name != model_name:
             cls._instance = cls(model_name)
         return cls._instance
+    
+    def embed_chunk(self, query: str) -> List[float]:
+        """
+        将单个查询字符串向量化（供记忆查询层调用）
+        
+        参数:
+            query: 用户提示词/查询内容
+        
+        返回:
+            List[float]: 向量表示（已归一化，适合余弦相似度）
+        
+        示例:
+            >>> service = EmbeddingService.get_instance()
+            >>> vector = service.embed_chunk("我护照什么时候过期？")
+            >>> print(len(vector))  # 512 (shibing624/text2vec-base-chinese的维度)
+        """
+        if not query or not query.strip():
+            raise ValueError("Query cannot be empty")
+        
+        # 使用model.encode进行向量化
+        embedding = self._model.encode(
+            [query],  # encode需要列表输入
+            batch_size=1,
+            normalize_embeddings=True,  # 归一化（余弦相似度空间）
+            show_progress_bar=False
+        )
+        
+        # 返回单个向量（List[float]格式）
+        return np.asarray(embedding[0], dtype=np.float32).tolist()
     
     def embed_batch(self, queries: List[str], batch_size: int = 32) -> List[List[float]]:
         """

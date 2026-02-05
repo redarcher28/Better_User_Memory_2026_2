@@ -1,9 +1,6 @@
 from dotenv import load_dotenv
 import os
-from serpapi import SerpApiClient
 from typing import Dict, Any, List, TypedDict
-from datetime import datetime
-import pytz
 
 import sympy as sp
 import numpy as np
@@ -13,16 +10,14 @@ from scipy import optimize
 load_dotenv()
 
 # 引用同目录下 group1 模块中的 RAG 查询与数据库接口（与 group1.py 同目录，直接 import group1）
-try:
-    from . import group1 as _group1
-except ImportError:
-    import group1 as _group1
+
+from RAG_query import Jcards_db, Embed_db, RAG_query
 
 
 def get_rag_history(
     query: str,
-    jcards_db: _group1.Jcards_db,
-    embed_db: _group1.Embed_db,
+    jcards_db: Jcards_db,
+    embed_db: Embed_db,
 ) -> List[str]:
     """
     引用RAG，返回以前需要的对话记录的片段。
@@ -41,7 +36,7 @@ def get_rag_history(
     返回值：
     - List[str]: 包含与 query 最相关的对话记录片段列表（重排后的 top 片段）
     """
-    rag = _group1.RAG_query()
+    rag = RAG_query()
     return rag.return_reranked_chunks(query=query, jcards_db=jcards_db, embed_db=embed_db)
 
 
@@ -288,30 +283,30 @@ class ToolExecutor:
         ])
 
 
-# --- 工具初始化与使用示例 ---
-if __name__ == '__main__':
-    # 1. 初始化工具执行器
-    toolExecutor = ToolExecutor()
+# # --- 工具初始化与使用示例 ---
+# if __name__ == '__main__':
+#     # 1. 初始化工具执行器
+#     toolExecutor = ToolExecutor()
 
-    # 2. 注册工具
-    search_description = "一个网页搜索引擎。当你需要回答关于时事、事实以及在你的知识库中找不到的信息时，应使用此工具。"
-    toolExecutor.registerTool("Search", search_description, search)
-    time_description = "一个获取当前时间的工具。当你需要回答关于时事的问题时，应使用此工具获取最新的时间。"
-    toolExecutor.registerTool("Time", time_description, get_current_time)
+#     # 2. 注册工具
+#     search_description = "一个网页搜索引擎。当你需要回答关于时事、事实以及在你的知识库中找不到的信息时，应使用此工具。"
+#     toolExecutor.registerTool("Search", search_description, search)
+#     time_description = "一个获取当前时间的工具。当你需要回答关于时事的问题时，应使用此工具获取最新的时间。"
+#     toolExecutor.registerTool("Time", time_description, get_current_time)
 
-    # 3. 打印可用的工具
-    print("\n--- 可用的工具 ---")
-    print(toolExecutor.getAvailableTools())
+#     # 3. 打印可用的工具
+#     print("\n--- 可用的工具 ---")
+#     print(toolExecutor.getAvailableTools())
 
-    # 4. 智能体的Action调用，这次我们问一个实时性的问题
-    print("\n--- 执行 Action: Search['英伟达最新的GPU型号是什么'] ---")
-    tool_name = "Search"
-    tool_input = "英伟达最新的GPU型号是什么"
+#     # 4. 智能体的Action调用，这次我们问一个实时性的问题
+#     print("\n--- 执行 Action: Search['英伟达最新的GPU型号是什么'] ---")
+#     tool_name = "Search"
+#     tool_input = "英伟达最新的GPU型号是什么"
 
-    tool_function = toolExecutor.getTool(tool_name)
-    if tool_function:
-        observation = tool_function(tool_input)
-        print("--- 观察 (Observation) ---")
-        print(observation)
-    else:
-        print(f"错误：未找到名为 '{tool_name}' 的工具。")
+#     tool_function = toolExecutor.getTool(tool_name)
+#     if tool_function:
+#         observation = tool_function(tool_input)
+#         print("--- 观察 (Observation) ---")
+#         print(observation)
+#     else:
+#         print(f"错误：未找到名为 '{tool_name}' 的工具。")

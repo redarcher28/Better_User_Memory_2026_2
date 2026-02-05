@@ -1,0 +1,14 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "ReAct 交互模式",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/group1/ReAct.py",
+            "args": ["--interactive"],
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}"
+        }
+    ]
+}
