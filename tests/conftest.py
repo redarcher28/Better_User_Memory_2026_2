@@ -1,10 +1,9 @@
 # tests/conftest.py
-"""Pytest fixtures for three-level user memory tests. Ensures project root is on path and provides vector store, Jcards mock, and Agent factory."""
+"""Pytest fixtures for three-level user memory tests."""
 import sys
 from pathlib import Path
 from typing import List, Optional
 
-# Project root on path so we can import group1, group3, jcards
 _ROOT = Path(__file__).resolve().parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
@@ -23,7 +22,7 @@ class MockJcardsDb:
 
 
 class MockLLMClient:
-    """LLM client that returns predefined responses in order. Used for deterministic tests."""
+    """LLM client that returns predefined responses in order."""
 
     def __init__(self, responses: List[str]):
         self.responses = list(responses)
@@ -75,7 +74,7 @@ def jcards_db_empty():
 
 @pytest.fixture
 def agent_factory(persist_dir, embed_db):
-    """Factory: (jcards_db, llm_client) -> ReActAgent. Caller supplies jcards and LLM."""
+    """Factory: (jcards_db, llm_client) -> ReActAgent."""
 
     def factory(jcards_db, llm_client):
         return _make_agent(persist_dir, jcards_db, embed_db, llm_client)

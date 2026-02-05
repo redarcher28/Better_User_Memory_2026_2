@@ -34,6 +34,105 @@
       "version": 0,
       "superseded_by": null,
       "deleted": false
+    },
+    {
+      "card_id": "card_dcd85ac3e681114112497af655adf831392b970f",
+      "fact_key": "张三的今日日程",
+      "value": {
+        "title": "张三的今日日程",
+        "body": "中午十二点：飞机\n晚上六点：跑步",
+        "tags": [
+          "日程",
+          "安排"
+        ],
+        "metadata": {
+          "external_id": "8ee83750-5ebe-4bba-8143-d04bc6e9812e"
+        }
+      },
+      "content": "张三的今日日程\n中午十二点：飞机\n晚上六点：跑步",
+      "backstory": "",
+      "person": "用户",
+      "relationship": "",
+      "status": "deleted",
+      "confidence": 0.6,
+      "source_ref": {
+        "conversation_id": "conv_unknown",
+        "turn_id": 0,
+        "speaker": "user",
+        "timestamp": "2026-02-05T23:18:13.276755"
+      },
+      "created_at": "2026-02-05T23:18:13.276755",
+      "updated_at": "2026-02-05T23:20:38.545333",
+      "event_id": "conv_unknown_0_user_1770304693",
+      "version": 1,
+      "superseded_by": null,
+      "deleted": true
+    },
+    {
+      "card_id": "card_cb2c90313da1f3bbc6f4847228312d50d5bd9471",
+      "fact_key": "张三的明日日程",
+      "value": {
+        "title": "张三的明日日程",
+        "body": "中午十二点：吃鸡",
+        "tags": [
+          "日程",
+          "安排"
+        ],
+        "metadata": {
+          "external_id": "efbd5845-7627-4e90-be05-805f9b216872"
+        }
+      },
+      "content": "张三的明日日程\n中午十二点：吃鸡",
+      "backstory": "",
+      "person": "用户",
+      "relationship": "",
+      "status": "active",
+      "confidence": 0.6,
+      "source_ref": {
+        "conversation_id": "conv_unknown",
+        "turn_id": 0,
+        "speaker": "user",
+        "timestamp": "2026-02-05T23:19:04.621381"
+      },
+      "created_at": "2026-02-05T23:19:04.621381",
+      "updated_at": "2026-02-05T23:19:04.621381",
+      "event_id": "conv_unknown_0_user_1770304744",
+      "version": 0,
+      "superseded_by": null,
+      "deleted": false
+    },
+    {
+      "card_id": "card_ab00e4b9e706044b58fd2d906ba82e6db05d77fa",
+      "fact_key": "张三的今日日程",
+      "value": {
+        "title": "张三的今日日程",
+        "body": "中午十二点：赶火车\n晚上六点：跑步",
+        "tags": [
+          "日程",
+          "安排"
+        ],
+        "metadata": {
+          "external_id": "e16b45cb-aedf-4c96-9bfa-04cd065cb799"
+        }
+      },
+      "content": "张三的今日日程\n中午十二点：赶火车\n晚上六点：跑步",
+      "backstory": "",
+      "person": "用户",
+      "relationship": "",
+      "status": "active",
+      "confidence": 0.6,
+      "source_ref": {
+        "conversation_id": "conv_unknown",
+        "turn_id": 0,
+        "speaker": "user",
+        "timestamp": "2026-02-05T23:20:38.545333"
+      },
+      "created_at": "2026-02-05T23:20:38.545333",
+      "updated_at": "2026-02-05T23:20:38.545333",
+      "event_id": "conv_unknown_0_user_1770304838",
+      "version": 0,
+      "superseded_by": null,
+      "deleted": false
     }
   ]
 }

@@ -12,8 +12,16 @@ from scipy import optimize
 load_dotenv()
 
 # 引用同目录下 group1 模块中的 RAG 查询与数据库接口（与 group1.py 同目录，直接 import group1）
+import sys
+from pathlib import Path as _Path
 
-from RAG_query import Jcards_db, Embed_db, RAG_query
+try:
+    from .RAG_query import Jcards_db, Embed_db, RAG_query
+except ImportError:
+    _group1_dir = _Path(__file__).resolve().parent
+    if str(_group1_dir) not in sys.path:
+        sys.path.insert(0, str(_group1_dir))
+    from RAG_query import Jcards_db, Embed_db, RAG_query
 from group3.rag_ingest_incremental import update_rag_vector_store as group3_update_rag_vector_store
 from jcards import get_jcard_service, Jcard, JcardStatus, SourceRef, CardWriteOps, WriteOpType
 

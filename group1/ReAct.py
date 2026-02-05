@@ -1,18 +1,34 @@
 import re
 import json
 import uuid
+import sys
+from pathlib import Path
 from datetime import datetime
 from typing import List, Optional
 
-from LLMCompatibleClient import LLMCompatibleClient
-from ToolExecutor import (
-    ToolExecutor,
-    get_rag_history,
-    update_rag_vector_store,
-    update_jcards_database,
-)
-from RAG_query import Jcards_db, Embed_db
-from new import build_system_prompt_with_warning
+try:
+    from .LLMCompatibleClient import LLMCompatibleClient
+    from .ToolExecutor import (
+        ToolExecutor,
+        get_rag_history,
+        update_rag_vector_store,
+        update_jcards_database,
+    )
+    from .RAG_query import Jcards_db, Embed_db
+    from .new import build_system_prompt_with_warning
+except ImportError:
+    _group1_dir = Path(__file__).resolve().parent
+    if str(_group1_dir) not in sys.path:
+        sys.path.insert(0, str(_group1_dir))
+    from LLMCompatibleClient import LLMCompatibleClient
+    from ToolExecutor import (
+        ToolExecutor,
+        get_rag_history,
+        update_rag_vector_store,
+        update_jcards_database,
+    )
+    from RAG_query import Jcards_db, Embed_db
+    from new import build_system_prompt_with_warning
 
 # #region agent log
 import os
@@ -40,12 +56,6 @@ except:
 # 系统提示词模板
 AGENT_SYSTEM_PROMPT = """
 你是一个有能力调用外部工具的智能助手。每轮对话中，你会看到「当前 Jcards 列表」；系统已根据当前问题与 Jcards 注入相应级别的安全警示（见本系统提示前文）。需要检索历史对话片段时请使用 RAG 查询工具，需要增删改聊天记录或 Jcards 时请使用对应的修改工具。
-
-写入规则（务必遵守）：
-1) **短期、非结构化、对话上下文型信息** → 写入 RAG（UpdateRAG）。例如：临时约定、当天事件、会话中的轶事、位置/时间的即时描述等。
-2) **长期稳定、可结构化的个人事实** → 写入 Jcards（UpdateJcards）。例如：姓名、过敏、偏好、固定关系等。
-3) **闲聊/情绪/无信息增量** → 不写入任何库。
-4) 当内容更偏“上下文细节”而非“稳定事实”时，优先写入 RAG。
 
 可用工具如下:
 {tools}
@@ -95,7 +105,7 @@ class ReActAgent:
             **模型只需提供**（必须严格遵守）：
             - action：字符串，"Add" 或 "Correct"。
             - concluded_content：字符串。Add 为新增对话内容，Correct 为替换后的正确内容。
-            - chunk_ids：Correct 时**必填**（要修改的 chunk 可追溯 ID 列表）；Add 时省略或 []。
+            - chunk_ids：Correct 时**必填**（要修改的 chunk 可追溯 ID 列表）；Add 时**必须省略**（不要传此字段）。
             - correct_behavior：仅 Correct 时有效，可选 "replace"（默认）或 "overwrite"。
             **由系统在工具内自动生成，模型请勿填写或虚构**：conversation_id、turn_id、speaker、timestamp（Add 时由工具包自动补全）。
             示例（Add）：{"action":"Add","concluded_content":"用户说：今天天气不错"}
@@ -140,7 +150,12 @@ class ReActAgent:
             data = json.loads(tool_input.strip())
             action = data.get("action")
             concluded_content = data.get("concluded_content", "")
-            chunk_ids = data.get("chunk_ids", [])
+            # Add 时后端要求 chunk_ids 必须为 None；Correct 时使用传入的列表
+            chunk_ids = data.get("chunk_ids")
+            if action == "Add":
+                chunk_ids = None
+            elif action == "Correct" and chunk_ids is None:
+                chunk_ids = []
             correct_behavior = data.get("correct_behavior", "replace")
             # 以下字段由系统在工具内生成，模型不必提供
             conversation_id = data.get("conversation_id") or ""

@@ -2,14 +2,13 @@
 """Level 1: Basic recall - agent accurately recalls specific information from a single session."""
 import sys
 from pathlib import Path
+from datetime import datetime
 
 _ROOT = Path(__file__).resolve().parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 import pytest
-from datetime import datetime
-
 from tests.conftest import MockJcardsDb, MockLLMClient
 
 
@@ -29,8 +28,7 @@ def seed_rag_checking_account(persist_dir: str) -> None:
     )
 
 
-@pytest.mark.parametrize("use_mock_llm", [True], ids=["mock_llm"])
-def test_level1_basic_recall_mock(agent_factory, jcards_db_empty, persist_dir, use_mock_llm):
+def test_level1_basic_recall_mock(agent_factory, jcards_db_empty, persist_dir):
     """With pre-seeded RAG and mock LLM, agent returns the stored account number."""
     seed_rag_checking_account(persist_dir)
 
