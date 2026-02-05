@@ -6,7 +6,7 @@
 - 读取对话事件（JSONL/JSON）后，生成 ChunkRecord 并 upsert 到向量库服务模块。
 
 默认选型（可替换）：
-- embedding: sentence-transformers (BAAI/bge-small-zh-v1.5)
+- embedding: sentence-transformers (shibing624/text2vec-base-chinese)
 - vector store: Chroma persistent (see rag_vector_store.py)
 """
 
@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 from collections import defaultdict
@@ -27,7 +28,7 @@ from dateutil import parser as dtparser
 from pydantic import BaseModel, Field
 from sentence_transformers import SentenceTransformer
 
-from rag_vector_store import (
+from .rag_vector_store import (
     SQLiteVectorStoreService,
     ChunkMetadata,
     ChunkRecord,
@@ -260,28 +261,33 @@ class EmbeddingService:
     
     _instance: Optional['EmbeddingService'] = None
     _model: Optional[SentenceTransformer] = None
-    _model_name: str = "BAAI/bge-small-zh-v1.5"
+    _model_name: str = "shibing624/text2vec-base-chinese"
     
-    def __init__(self, model_name: str = "BAAI/bge-small-zh-v1.5"):
+    def __init__(self, model_name: str = "shibing624/text2vec-base-chinese"):
         """
         初始化向量化服务
         
         参数:
-            model_name: SentenceTransformer模型名称（默认: BAAI/bge-small-zh-v1.5）
+            model_name: SentenceTransformer模型名称（默认: shibing624/text2vec-base-chinese）
         """
         self.model_name = model_name
         self._load_model()
     
     def _load_model(self) -> None:
-        """加载embedding模型（懒加载）"""
+        """加载 embedding 模型（懒加载）。支持 HF 镜像与本地路径。"""
         if self._model is None or self._model_name != self.model_name:
-            print(f"Loading embedding model: {self.model_name}...", file=sys.stderr)
-            self._model = SentenceTransformer(self.model_name)
-            self._model_name = self.model_name
-            print(f"Model loaded successfully.", file=sys.stderr)
+            # 若无法直连 Hugging Face，可设置 USE_HF_MIRROR=1 或 HF_ENDPOINT=https://hf-mirror.com
+            if os.environ.get("USE_HF_MIRROR", "").lower() in ("1", "true", "yes"):
+                os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
+            # 优先使用本地路径，避免联网
+            model_path = os.environ.get("EMBED_MODEL_PATH", self.model_name)
+            print(f"Loading embedding model: {model_path}...", file=sys.stderr)
+            self._model = SentenceTransformer(model_path)
+            self._model_name = model_path
+            print("Model loaded successfully.", file=sys.stderr)
     
     @classmethod
-    def get_instance(cls, model_name: str = "BAAI/bge-small-zh-v1.5") -> 'EmbeddingService':
+    def get_instance(cls, model_name: str = "shibing624/text2vec-base-chinese") -> 'EmbeddingService':
         """
         获取单例实例（避免重复加载模型）
         
@@ -308,7 +314,7 @@ class EmbeddingService:
         示例:
             >>> service = EmbeddingService.get_instance()
             >>> vector = service.embed_chunk("我护照什么时候过期？")
-            >>> print(len(vector))  # 512 (BAAI/bge-small-zh-v1.5的维度)
+            >>> print(len(vector))  # 512 (shibing624/text2vec-base-chinese的维度)
         """
         if not query or not query.strip():
             raise ValueError("Query cannot be empty")
@@ -349,7 +355,7 @@ class EmbeddingService:
 
 
 # 便捷函数：供外部快速调用
-def embed_chunk(query: str, model_name: str = "BAAI/bge-small-zh-v1.5") -> List[float]:
+def embed_chunk(query: str, model_name: str = "shibing624/text2vec-base-chinese") -> List[float]:
     """
     便捷函数：将用户查询向量化（供记忆查询层调用）
     
@@ -397,7 +403,7 @@ def main() -> None:
     ap.add_argument("--events_jsonl", required=True, help="输入事件 JSONL（每行一个 MemoryEvent）")
     ap.add_argument("--persist_dir", default=".vector_store", help="向量库持久化目录（SQLite 文件会放在这里）")
     ap.add_argument("--collection", default="user_memory_chunks", help="(兼容保留) collection 名称；SQLite实现不使用")
-    ap.add_argument("--embed_model", default="BAAI/bge-small-zh-v1.5", help="SentenceTransformer 模型名")
+    ap.add_argument("--embed_model", default="shibing624/text2vec-base-chinese", help="SentenceTransformer 模型名")
     ap.add_argument("--max_chars", type=int, default=600)
     ap.add_argument("--overlap_chars", type=int, default=80)
     ap.add_argument("--chunk_version", type=int, default=1)
