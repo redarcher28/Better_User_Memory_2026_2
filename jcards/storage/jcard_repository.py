@@ -33,7 +33,8 @@ class JcardRepository:
         self._status_index: Dict[JcardStatus, List[str]] = {
             JcardStatus.ACTIVE: [],
             JcardStatus.SUPERSEDED: [],
-            JcardStatus.UNCERTAIN: []
+            JcardStatus.UNCERTAIN: [],
+            JcardStatus.DELETED: []
         }
         
         # 线程安全锁
@@ -164,7 +165,7 @@ class JcardRepository:
     def _remove_from_indices(self, jcard: Jcard):
         """从所有索引中移除卡片"""
         # 从状态索引中移除
-        if jcard.card_id in self._status_index[jcard.status]:
+        if jcard.status in self._status_index and jcard.card_id in self._status_index[jcard.status]:
             self._status_index[jcard.status].remove(jcard.card_id)
         
         # 从 person_fact 索引中移除
@@ -175,6 +176,8 @@ class JcardRepository:
     def _add_to_indices(self, jcard: Jcard):
         """添加到所有索引"""
         # 状态索引
+        if jcard.status not in self._status_index:
+            self._status_index[jcard.status] = []
         if jcard.card_id not in self._status_index[jcard.status]:
             self._status_index[jcard.status].append(jcard.card_id)
         
@@ -353,6 +356,7 @@ class JcardRepository:
                     card.status = JcardStatus.DELETED
                     card.updated_at = datetime.now()
                     card.version += 1
+                    self._update_indexes(card)
                     deleted_count += 1
             
             return deleted_count
@@ -399,21 +403,34 @@ class JcardRepository:
             
             return True
     
-    def logical_delete_by_source(self, conversation_id: str, turn_range: List[int]) -> int:
+    def logical_delete_by_source(
+        self, conversation_id: str, turn_id: Optional[int] = None, turn_range: Optional[List[int]] = None
+    ) -> int:
         """根据来源逻辑删除 Jcard"""
         with self._lock:
             deleted_count = 0
             
             for card in self._cards.values():
-                if (card.source_ref.conversation_id == conversation_id and 
-                    card.source_ref.turn_range == turn_range):
+                if card.source_ref.conversation_id != conversation_id:
+                    continue
+                if turn_id is not None and card.source_ref.turn_id != turn_id:
+                    continue
+                if turn_range:
+                    if len(turn_range) >= 2:
+                        start, end = int(turn_range[0]), int(turn_range[1])
+                        if not (start <= card.source_ref.turn_id <= end):
+                            continue
+                    else:
+                        continue
                     # 记录事务状态
                     if self._transaction_stack:
                         self._record_card_state(card.card_id)
                     
                     card.deleted = True
+                    card.status = JcardStatus.DELETED
                     card.updated_at = datetime.now()
                     card.version += 1
+                    self._update_indexes(card)
                     deleted_count += 1
             
             return deleted_count

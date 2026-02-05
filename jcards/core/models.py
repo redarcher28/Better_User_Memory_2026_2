@@ -250,6 +250,7 @@ class DeleteRequest:
     """删除请求"""
     card_ids: List[str]
     conversation_id: Optional[str] = None
+    turn_id: Optional[int] = None
     turn_range: Optional[List[int]] = None
 
 

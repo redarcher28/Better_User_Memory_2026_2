@@ -149,6 +149,12 @@ class JcardService:
             if not errors:  # 如果errors为空，说明是其他异常
                 errors.append(f"操作执行失败: {str(e)}")
         
+        if errors:
+            upserted_ids = []
+            updated_ids = []
+            superseded_ids = []
+            deleted_ids = []
+        
         # 构建结果，使用新的字段名
         result = WriteResult(
             applied=len(errors) == 0,
@@ -174,13 +180,14 @@ class JcardService:
         try:
             if request.card_ids:
                 deleted_count = self.repository.logical_delete(request.card_ids)
-            elif request.conversation_id and request.turn_range:
+            elif request.conversation_id and (request.turn_id is not None or request.turn_range):
                 deleted_count = self.repository.logical_delete_by_source(
                     request.conversation_id, 
-                    request.turn_range
+                    turn_id=request.turn_id,
+                    turn_range=request.turn_range
                 )
             else:
-                errors.append("必须提供 card_ids 或 conversation_id 和 turn_range")
+                errors.append("必须提供 card_ids 或 conversation_id 与 turn_id/turn_range")
         
         except Exception as e:
             errors.append(f"删除操作失败: {str(e)}")
