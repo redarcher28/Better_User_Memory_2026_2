@@ -395,9 +395,10 @@ class ReActAgent:
 
 
     # route: 1-1-3 将模型的thought和action从模型输出text中分离出来，返回thought, action
+    # Step 使用多行匹配，避免 Finish[...] 内换行时只截到第一行导致最终答案为空
     def _parse_output(self, text: str):
         thought_match = re.search(r"Thought: (.*)", text)
-        action_match = re.search(r"Step: (.*)", text)
+        action_match = re.search(r"Step: (.*?)(?=\n\s*Thought:|\Z)", text, re.DOTALL)
         thought = thought_match.group(1).strip() if thought_match else None
         action = action_match.group(1).strip() if action_match else None
         return thought, action
@@ -420,8 +421,14 @@ class ReActAgent:
     #  该函数功能为提取Finish后【】里的字符串
     def _parse_action_input(self, action_text: str):
         match = re.match(r"Finish\[(.*)\]", action_text, re.DOTALL)
-        # match = re.match(r"\w+\[(.*)\]", action_text)
-        return match.group(1) if match else ""
+        if match:
+            return match.group(1).strip()
+        # 回退：若已判定为 Finish 但正则未匹配（如格式细微差异），截取 Finish[ 与末尾 ] 之间的内容
+        if action_text.strip().startswith("Finish["):
+            s = action_text.strip()
+            if s.endswith("]"):
+                return s[7:-1].strip()
+        return ""
 
 
 if __name__ == "__main__":

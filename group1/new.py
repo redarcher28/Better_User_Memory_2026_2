@@ -1,6 +1,6 @@
 from typing import List
 import re
-
+import logging
 
 # 高风险关键词库（可根据业务扩展）
 HIGH_RISK_KEYWORDS = {
@@ -84,9 +84,10 @@ def get_warning_prompt(severity: float) -> str:
 
     if severity < 0.3:
         return (
-            "你是一个智能助手，请基于以下提供的参考信息（Jcards）回答用户问题。\n"
-            "若参考信息与问题相关但不完整，可适当补充常识；若完全无关，请说明无法回答。\n"
-            "回答应保持礼貌、简洁，并避免猜测。"
+            "如果用户描述了一段行动和内容，请根据jcards和RAG中的内容，判断是否存在冲突，并给出正确的建议。"
+            "如果用户描述了一段行动和内容，请根据jcards和RAG中的内容，判断是否存在冲突，并给出正确的建议。"
+            "如果用户明确坚持现在的行动，请主动RAG和Jcards修正，并给出修正后的内容。"
+            "如果用户明确坚持现在的行动，请主动RAG和Jcards修正，并给出修正后的内容。"
         )
     elif severity < 0.6:
         return (
@@ -123,6 +124,8 @@ def build_system_prompt_with_warning(
     """
     severity = estimate_severity(question, jcards_list)
     warning = get_warning_prompt(severity)
+    # TODO: 对warning的内容打印，后续需要删除
+    logging.info(f"warning: {warning}")
     return warning + "\n\n" + base_system_prompt
 
 

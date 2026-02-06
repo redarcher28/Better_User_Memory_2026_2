@@ -1,4 +1,7 @@
 import os
+import queue
+import threading
+import time
 from openai import OpenAI
 from dotenv import load_dotenv
 from typing import List, Dict
@@ -23,6 +26,7 @@ class LLMCompatibleClient:
         apiKey = apiKey or os.getenv("LLM_API_KEY")
         baseUrl = baseUrl or os.getenv("LLM_BASE_URL")
         timeout = timeout or int(os.getenv("LLM_TIMEOUT", 60))
+        self.stream_read_timeout = int(os.getenv("LLM_STREAM_READ_TIMEOUT", 120))
 
         if not all([self.model, apiKey, baseUrl]):
             raise ValueError("模型ID、API密钥和服务地址必须被提供或在.env文件中定义。")
@@ -39,23 +43,56 @@ class LLMCompatibleClient:
         """
         print(f"🧠 正在调用 {self.model} 模型...")
         try:
-            # TODO: 添加的调试性内容，后续需要删除
-            print(f"\n\n发给模型的实际内容: {messages}\n\n")
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,
                 temperature=temperature,
                 stream=True,
             )
+            # 流式读取带超时：子线程往队列放 chunk，主线程带超时取，避免“响应成功”后长时间无内容
+            chunk_queue = queue.Queue()
+            stream_error = []
 
-            # 处理流式响应
-            print("✅ 大语言模型响应成功:")
+            def consume_stream():
+                try:
+                    for chunk in response:
+                        content = chunk.choices[0].delta.content or ""
+                        if content:
+                            chunk_queue.put(content)
+                    chunk_queue.put(None)
+                except Exception as e:
+                    stream_error.append(e)
+                    chunk_queue.put(("__error__", e))
+
+            reader = threading.Thread(target=consume_stream, daemon=True)
+            reader.start()
             collected_content = []
-            for chunk in response:
-                content = chunk.choices[0].delta.content or ""
-                print(content, end="", flush=True)
-                collected_content.append(content)
-            print()  # 在流式输出结束后换行
+            start_time = time.monotonic()
+            first_chunk = True
+            while True:
+                remaining = self.stream_read_timeout - (time.monotonic() - start_time)
+                if remaining <= 0:
+                    print("\n❌ 流式读取超时：超过 {} 秒未完成。".format(self.stream_read_timeout))
+                    return None
+                try:
+                    item = chunk_queue.get(timeout=min(60, remaining))
+                except queue.Empty:
+                    print("\n❌ 流式读取超时：等待下一块内容超时。")
+                    return None
+                if item is None:
+                    break
+                if isinstance(item, tuple) and item[0] == "__error__":
+                    print(f"\n❌ 调用LLM API时发生错误: {item[1]}")
+                    return None
+                if first_chunk:
+                    print("✅ 大语言模型响应成功:")
+                    first_chunk = False
+                print(item, end="", flush=True)
+                collected_content.append(item)
+            print()
+            if stream_error:
+                print(f"❌ 流式读取过程中发生错误: {stream_error[0]}")
+                return None
             return "".join(collected_content)
 
         except Exception as e:

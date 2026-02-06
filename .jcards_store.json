@@ -133,6 +133,72 @@
       "version": 0,
       "superseded_by": null,
       "deleted": false
+    },
+    {
+      "card_id": "card_972d873c821c3f3df5e066daaf3d4417297c902a",
+      "fact_key": "用户张三的车辆信息",
+      "value": {
+        "title": "用户张三的车辆信息",
+        "body": "品牌：丰田",
+        "tags": [
+          "用户信息",
+          "资产"
+        ],
+        "metadata": {
+          "external_id": "46167ca6-a1ac-4f06-b56f-41a5311fa863"
+        }
+      },
+      "content": "用户张三的车辆信息\n品牌：丰田",
+      "backstory": "",
+      "person": "用户",
+      "relationship": "",
+      "status": "active",
+      "confidence": 0.6,
+      "source_ref": {
+        "conversation_id": "conv_unknown",
+        "turn_id": 0,
+        "speaker": "user",
+        "timestamp": "2026-02-06T10:26:26.395763"
+      },
+      "created_at": "2026-02-06T10:26:26.396769",
+      "updated_at": "2026-02-06T10:26:26.396769",
+      "event_id": "conv_unknown_0_user_1770344786",
+      "version": 0,
+      "superseded_by": null,
+      "deleted": false
+    },
+    {
+      "card_id": "card_7d82ca999cbd1893217e0a86a2fcdebf9537b7c3",
+      "fact_key": "用户张三的车辆信息（本田）",
+      "value": {
+        "title": "用户张三的车辆信息（本田）",
+        "body": "品牌：本田",
+        "tags": [
+          "用户信息",
+          "资产"
+        ],
+        "metadata": {
+          "external_id": "1eb2a189-175b-4164-8d23-95cf39abe4ff"
+        }
+      },
+      "content": "用户张三的车辆信息（本田）\n品牌：本田",
+      "backstory": "",
+      "person": "用户",
+      "relationship": "",
+      "status": "active",
+      "confidence": 0.6,
+      "source_ref": {
+        "conversation_id": "conv_unknown",
+        "turn_id": 0,
+        "speaker": "user",
+        "timestamp": "2026-02-06T10:26:52.559720"
+      },
+      "created_at": "2026-02-06T10:26:52.559720",
+      "updated_at": "2026-02-06T10:26:52.559720",
+      "event_id": "conv_unknown_0_user_1770344812",
+      "version": 0,
+      "superseded_by": null,
+      "deleted": false
     }
   ]
 }
